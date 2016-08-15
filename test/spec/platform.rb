@@ -183,6 +183,12 @@ module HabTesting
             puts "★ Generated ring key"
             # we don't generate a service key here because they depend
             # on the name of the service that's being run
+
+            # your first run will probably be slower as we need
+            # to build the simple_service fixture.
+            # Subsequent restarts of the tests will pickup
+            # the installed package.
+            build_and_install_shared_fixture
             puts "★ Setup complete"
             puts "-" * 80
         end
@@ -429,7 +435,7 @@ module HabTesting
                     cmdline += "--peer #{listen_peer_port - 1 }"
                 end
                 puts cmdline
-                bg_cmd(cmdline)
+                #bg_cmd(cmdline)
                 child = TestSupervisor.new(0, package_to_run, listen_peer_port, sidecar_port, group, org)
                 puts child
                 children << child
