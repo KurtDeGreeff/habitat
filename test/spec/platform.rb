@@ -13,6 +13,7 @@
 # limitations under the License.
 
 require 'fileutils'
+require 'ipaddr'
 require 'mixlib/shellout'
 require 'open3'
 require 'pathname'
@@ -58,8 +59,123 @@ module HabTesting
             end
             return results
         end
-    end
 
+        class Ring
+            attr_accessor :ctx
+            attr_accessor :members
+
+            def initialize(ctx, num_supervisors, package_to_run, group, org)
+                @ctx = ctx 
+                puts @ctx
+                listen_peer_port=9000
+                sidecar_port=8000
+                @members = []
+                num_supervisors.times do |i|
+                    puts "Creating member #{i}"
+                    if i > 0 then
+                        my_peer_port = listen_peer_port - 1 
+                    else
+                        my_peer_port = nil
+                    end
+
+                    member = HabTesting::Utils::RingMember.new(i,
+                                                               @ctx,
+                                                               package_to_run,
+                                                               listen_peer_port,
+                                                               sidecar_port,
+                                                               group,
+                                                               org,
+                                                               my_peer_port)
+                    puts member if @cmd_debug
+                    @members << member 
+                    listen_peer_port += 1
+                    sidecar_port += 1
+                end
+            end
+
+            # put the ring into /mnt/doom
+            def destroy()
+                @members.each do |member|
+                    member.stop()
+                end
+            end
+
+            def start
+                @members.each do |member|
+                    member.start
+                end
+            end
+
+            def stop(signal=9)
+                @members.each do |member|
+                    member.stop(signal)
+                end
+            end
+        end
+
+        class RingMember
+            attr_accessor :ctx
+            attr_accessor :group
+            attr_accessor :http_port
+            attr_accessor :id
+            attr_accessor :org
+            attr_accessor :package
+            # someone elses supervisor port, we'll join to it
+            attr_accessor :peer_port
+            attr_accessor :pid
+            attr_accessor :port
+
+            def initialize(id, ctx, package, port, http_port, group, org, peer_port=nil)
+                @ctx = ctx
+                @group = group 
+                @http_port = http_port
+                @id = id
+                @org = org
+                @package = package
+                @peer_port = peer_port
+                @port = port
+            end
+
+            def start
+                cmdline = "start #{@package}" \
+                    " --listen-peer #{@ctx.public_ip}:#{@port}" \
+                    " --listen-http #{@ctx.public_ip}:#{@http_port}" \
+                    " --group #{@group} --org #{@org}"
+
+                if not @peer_port.nil? then
+                    # if we aren't the first, the join up to the previous sup that's been started
+                    cmdline += " --peer #{@peer_port}"
+                end
+                
+                puts "» Starting ring member #{@id}"
+                cmdline += " >> #{@ctx.log_file_name} 2>&1"
+                @pid = spawn(cmdline)
+                # have the ctx keep track of all children we spawn
+                @ctx.all_children << [cmdline, @pid]
+                puts "★ Started ring member #{@id}, pid #{@pid}"
+            end
+
+            def restart(signal=9)
+                stop(signal)
+                start()
+            end
+
+            # todo: pull out Process.kill and make a ctx.kill method
+            # thats platform independent
+            def stop(signal=9)
+                puts "» Killing process #{@pid}"
+                begin
+                    Process.kill(signal, @pid)
+                    Process.wait(@pid)
+                rescue
+                    puts "Failed to kill process #{@pid}"
+                end
+                puts "★ Killed process #{@pid}"
+
+            end
+        end
+
+    end
 
     TestDir = Struct.new(:path, :caller)
 
@@ -131,6 +247,9 @@ module HabTesting
         # a test run if they do not exist.
         attr_accessor :shared_test_origin
 
+
+        attr_accessor :public_ip
+
         def initialize
             @all_children = []
             @cleanup = true
@@ -156,9 +275,12 @@ module HabTesting
         end
 
 
+
         # Common setup for tests, including setting a test origin
         # and key generation.
         def common_setup
+            get_public_ip
+
             if not ENV['HAB_TEST_DEBUG'].nil? then
                 puts "★ Debugging enabled"
                 @cmd_debug = true
@@ -277,9 +399,17 @@ module HabTesting
             end
 
         end
+
+        # convenience method for creating a ring and "link" it to
+        # a ctx
+        def create_ring(num_supervisors, package_to_run, group, org)
+            return HabTesting::Utils::Ring.new(self, num_supervisors, package_to_run, group, org)
+        end
     end
 
     class LinuxPlatform < Platform
+        attr_accessor :ip_path
+        attr_accessor :awk_path
 
         def initialize
             super
@@ -296,7 +426,20 @@ module HabTesting
             @log_dir = "./logs"
             @log_name = "hab_test-#{Time.now.utc.iso8601.gsub(/\:/, '-')}.log"
 
+
+            @ip_path = "/sbin/ip"
+            @awk_path = "/usr/bin/awk"
             banner()
+        end
+
+        def get_public_ip
+            puts "» Detecting IP"
+            ip = `#{@ip_path} route get 8.8.8.8 | #{@awk_path} '{printf "%s", $NF; exit}'`
+            # parse the result, it should be an ip
+            # if not, use this low-tech solution to make the tests fail
+            IPAddr.new(ip)
+            puts "★ Detected IP address as #{ip}"
+            @public_ip = ip
         end
 
         def common_setup
@@ -381,24 +524,26 @@ module HabTesting
         end
 
         # runs a command in the background, returns a pid
-        def bg_cmd(cmdline, **cmd_options)
-            debug = cmd_options[:debug] || @cmd_debug
+        # DON'T THIS, it has subtle bugs because of the | tee
+        # and pids
+        #def bg_cmd(cmdline, **cmd_options)
+        #    debug = cmd_options[:debug] || @cmd_debug
 
-            if debug then
-                puts "X" * 80
-                puts `env`
-                puts "X" * 80
-            end
+        #    if debug then
+        #        puts "X" * 80
+        #        puts `env`
+        #        puts "X" * 80
+        #    end
 
-            fullcmdline = "#{@hab_bin} #{cmdline} | tee -a #{log_file_name()} 2>&1"
-            # record the command we'll be running in the log file
-            `echo #{fullcmdline} >> #{log_file_name()}`
-            puts " → #{fullcmdline}"
-            # TODO: replace this with Mixlib:::Shellout
-            pid = spawn(fullcmdline)
-            @all_children << [cmdline, pid]
-            return pid
-        end
+        #    fullcmdline = "#{@hab_bin} #{cmdline} | tee -a #{log_file_name()} 2>&1"
+        #    # record the command we'll be running in the log file
+        #    `echo #{fullcmdline} >> #{log_file_name()}`
+        #    puts " → #{fullcmdline}"
+        #    # TODO: replace this with Mixlib:::Shellout
+        #    pid = spawn(fullcmdline)
+        #    @all_children << [cmdline, pid]
+        #    return pid
+        #end
 
 
         # create a common key that we use for testing only.
@@ -422,27 +567,8 @@ module HabTesting
             end
         end
 
-        # TODO: move this
-        TestSupervisor = Struct.new(:pid, :package, :port, :http_port, :group, :org)
-        def create_ring(num_supervisors, package_to_run, group, org)
-            listen_peer_port=9000
-            sidecar_port=8000
-            children = []
-            num_supervisors.times do |i|
-                cmdline = "start #{package_to_run} --listen-peer #{listen_peer_port} --listen-http #{sidecar_port} --group #{group} --org #{org}"
-                if i > 0 then
-                    # if we aren't the first, the join up to the previous sup that's been started
-                    cmdline += "--peer #{listen_peer_port - 1 }"
-                end
-                puts cmdline
-                #bg_cmd(cmdline)
-                child = TestSupervisor.new(0, package_to_run, listen_peer_port, sidecar_port, group, org)
-                puts child
-                children << child
-            end
-            children
-        end
 
+       
         # execute a possibly long-running process and wait for a particular string
         # in it's output. If the output is found, kill the process and return
         # it's exit status. Otherwise, raise an exception so specs fail quickly.

@@ -44,6 +44,9 @@ pub fn parse_ip_port_with_defaults(s: Option<&str>,
                                    default_ip: &str,
                                    default_port: u16)
                                    -> Result<(String, u16)> {
+    println!("s = {}", &s.unwrap_or("NONE"));
+    println!("default_ip = {}", &default_ip);
+    println!("default_port = {}", &default_port);
     if let None = s {
         // return the default IP:Port combo
         return Ok((default_ip.to_string(), default_port));
