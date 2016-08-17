@@ -448,8 +448,8 @@ module HabTesting
             sleep_increment_seconds = wait_options[:sleep_increment_seconds] || 1
             show_progress = wait_options[:show_progress] || true
 
-            puts "debug = #{debug}"
-            puts "sleep_increment_seconds = #{sleep_increment_seconds}"
+            puts "debug = #{debug}" if debug
+            puts "sleep_increment_seconds = #{sleep_increment_seconds}" if debug
 
             puts "Waiting for #{title}, max retries = #{max_retries}, max_wait_seconds = #{max_wait_seconds}"
             retries = 0
