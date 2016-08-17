@@ -42,23 +42,11 @@ describe "Habitat CLI" do
     # Perhaps this could be shared in the future.
     context "core cli binaries" do
         it "hab command should be compiled" do
-	        puts "Looking for #{ctx.hab_bin}"
-	        puts "Looking for #{ctx.hab_bin}"
-	        puts "Looking for #{ctx.hab_bin}"
-	        puts "Looking for #{ctx.hab_bin}"
-	        puts "Looking for #{ctx.hab_bin}"
-	        puts "Looking for #{ctx.hab_bin}"
             expect(File.exist?(ctx.hab_bin)).to be true
             expect(File.executable?(ctx.hab_bin)).to be true
         end
 
         it "hab-sup command should be compiled" do
-    	    puts "Looking for #{ctx.hab_sup_bin}"
-    	    puts "Looking for #{ctx.hab_sup_bin}"
-    	    puts "Looking for #{ctx.hab_sup_bin}"
-    	    puts "Looking for #{ctx.hab_sup_bin}"
-    	    puts "Looking for #{ctx.hab_sup_bin}"
-    	    puts "Looking for #{ctx.hab_sup_bin}"
             expect(File.exist?(ctx.hab_sup_bin)).to be true
             expect(File.executable?(ctx.hab_sup_bin)).to be true
         end

@@ -23,6 +23,12 @@ require 'singleton'
 require 'time'
 require 'timeout'
 
+
+# TODO: move these?
+require 'json'
+require 'net/http'
+require "uri"
+
 module HabTesting
 
 
@@ -101,6 +107,7 @@ module HabTesting
             end
 
             def start
+                # TODO: wait until started!
                 @members.each do |member|
                     member.start
                 end
@@ -137,7 +144,7 @@ module HabTesting
             end
 
             def start
-                cmdline = "start #{@package}" \
+                cmdline = "#{@ctx.hab_bin} start #{@package}" \
                     " --listen-peer #{@ctx.public_ip}:#{@port}" \
                     " --listen-http #{@ctx.public_ip}:#{@http_port}" \
                     " --group #{@group} --org #{@org}"
@@ -147,12 +154,17 @@ module HabTesting
                     cmdline += " --peer #{@peer_port}"
                 end
                 
+                # TODO: redirecting output returns the shell pid, not the hab-sup pid
+                # so it's hard to kill these (maybe kill the group?)
+                #cmdline += " >> #{@ctx.log_file_name} 2>&1"
+
                 puts "» Starting ring member #{@id}"
-                cmdline += " >> #{@ctx.log_file_name} 2>&1"
-                @pid = spawn(cmdline)
+                puts "COMMAND LINE = #{cmdline}" if @ctx.cmd_debug
+                # create a new process group to make the child easier to terminate
+                @pid = spawn(cmdline, :pgroup => true, [:out, :err]=>@ctx.log_file_name)
                 # have the ctx keep track of all children we spawn
                 @ctx.all_children << [cmdline, @pid]
-                puts "★ Started ring member #{@id}, pid #{@pid}"
+                puts "★ Started ring member #{@id}, pid #{@pid}, gossip port #{@port}, http port #{@http_port}"
             end
 
             def restart(signal=9)
@@ -172,6 +184,47 @@ module HabTesting
                 end
                 puts "★ Killed process #{@pid}"
 
+            end
+
+
+            def http_get(path, as_json=true)
+                http = Net::HTTP.new("#{@ctx.public_ip}", @http_port)
+                request = Net::HTTP::Get.new(path)
+                response = http.request(request)
+                puts "RESPONSE BODY = #{response.body}" if @ctx.cmd_debug
+                puts "RESPONSE CODE = #{response.code}" if @ctx.cmd_debug
+                # TODO: look at response code etc
+                if as_json then
+                    JSON.parse(response.body)
+                else
+                    response
+                end
+            end
+
+            def get_census
+                http_get("/census")
+            end
+
+            def get_config
+                # TODO: parse the toml?
+                http_get("/config", false)
+            end
+
+            def get_election
+                http_get("/election")
+            end
+
+            def get_gossip
+                http_get("/gossip")
+            end
+
+            def get_health
+                http_get("/health")
+            end
+
+            def get_status
+                # this doesn't return valid json
+                http_get("/status", false)
             end
         end
 
@@ -386,18 +439,18 @@ module HabTesting
                     puts "block result = #{result}" if debug
                     print "*" if show_progress
                     if result then
+                        puts " -> Success" if show_progress
                         return result
                     else
                         retries += 1
                     end
                     sleep(sleep_increment_seconds)
                 end
-                print "" if show_progress
+                puts "" if show_progress
                 if retries >= max_reties
                     throw "#{title} failed after #{retries} retries"
                 end
             end
-
         end
 
         # convenience method for creating a ring and "link" it to
