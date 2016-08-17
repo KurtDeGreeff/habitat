@@ -71,15 +71,13 @@ module HabTesting
             attr_accessor :members
 
             def initialize(ctx, num_supervisors, package_to_run, group, org)
-                @ctx = ctx 
-                puts @ctx
+                @ctx = ctx
                 listen_peer_port=9000
                 sidecar_port=8000
                 @members = []
                 num_supervisors.times do |i|
-                    puts "Creating member #{i}"
                     if i > 0 then
-                        my_peer_port = listen_peer_port - 1 
+                        my_peer_port = listen_peer_port - 1
                     else
                         my_peer_port = nil
                     end
@@ -93,7 +91,7 @@ module HabTesting
                                                                org,
                                                                my_peer_port)
                     puts member if @cmd_debug
-                    @members << member 
+                    @members << member
                     listen_peer_port += 1
                     sidecar_port += 1
                 end
@@ -118,6 +116,30 @@ module HabTesting
                     member.stop(signal)
                 end
             end
+
+            def wait_for_all_nodes_to_start
+                @ctx.wait_for("nodes to start") do
+                    begin
+                        @members.each do |member|
+                            member.get_status
+                        end
+                        true
+                    rescue
+                        false
+                    end
+                end
+            end
+
+            def wait_for_all_nodes_to_join
+                @ctx.wait_for("all nodes to join") do
+                    begin
+                        gossip = @members[0].get_gossip
+                        gossip["member_list"]["members"].length == 3
+                    rescue
+                        false
+                    end
+                end
+            end
         end
 
         class RingMember
@@ -134,7 +156,7 @@ module HabTesting
 
             def initialize(id, ctx, package, port, http_port, group, org, peer_port=nil)
                 @ctx = ctx
-                @group = group 
+                @group = group
                 @http_port = http_port
                 @id = id
                 @org = org
@@ -150,10 +172,11 @@ module HabTesting
                     " --group #{@group} --org #{@org}"
 
                 if not @peer_port.nil? then
-                    # if we aren't the first, the join up to the previous sup that's been started
-                    cmdline += " --peer #{@peer_port}"
+                    # if we aren't the first, the join up to the previous sup
+                    # that's been started
+                    cmdline += " --peer #{@ctx.public_ip}:#{@peer_port}"
                 end
-                
+
                 # TODO: redirecting output returns the shell pid, not the hab-sup pid
                 # so it's hard to kill these (maybe kill the group?)
                 #cmdline += " >> #{@ctx.log_file_name} 2>&1"
@@ -437,7 +460,7 @@ module HabTesting
                     puts "Calling block [retry #{retries} of #{max_retries}]" if debug
                     result = block.call
                     puts "block result = #{result}" if debug
-                    print "*" if show_progress
+                    print "." if show_progress
                     if result then
                         puts " -> Success" if show_progress
                         return result
@@ -621,7 +644,7 @@ module HabTesting
         end
 
 
-       
+
         # execute a possibly long-running process and wait for a particular string
         # in it's output. If the output is found, kill the process and return
         # it's exit status. Otherwise, raise an exception so specs fail quickly.

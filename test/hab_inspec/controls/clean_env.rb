@@ -8,7 +8,8 @@ hab_env_vars = %w(HAB_AUTH_TOKEN
                   HAB_RING_KEY
                   HAB_STUDIOS_HOME
                   HAB_STUDIO_ROOT
-                  HAB_USER)
+                  HAB_USER
+                  no_proxy)
 
 
 hab_ports = [9631, 9632, 9636]
