@@ -140,6 +140,19 @@ module HabTesting
                     end
                 end
             end
+
+            def wait_until_node_stops(node_id)
+                @ctx.wait_until_exception("member #{node_id} to stop") do
+                    @members[node_id].get_status
+                end
+            end
+
+            def wait_until_node_starts(node_id)
+                @ctx.wait_until_no_exception("member #{node_id} to start") do
+                    @members[node_id].get_status
+                end
+            end
+
         end
 
         class RingMember
@@ -475,6 +488,29 @@ module HabTesting
                 end
             end
         end
+
+        def wait_until_exception(title, **wait_options, &block)
+            wait_for(title, wait_options) do
+                begin
+                    yield block
+                    false
+                rescue
+                    true
+                end
+            end
+        end
+
+        def wait_until_no_exception(title, **wait_options, &block)
+            wait_for(title, wait_options) do
+                begin
+                    yield block
+                    true
+                rescue
+                    false
+                end
+            end
+        end
+
 
         # convenience method for creating a ring and "link" it to
         # a ctx
